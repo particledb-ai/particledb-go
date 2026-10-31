@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package spanner.common;
+
+option java_package = "com.spanner.common";
+option go_package = "github.com/particledb-ai/particledb-go/proto/commonpb";
+
+// Hybrid logical clock timestamp combining physical and logical components.
+message Timestamp {
+  uint64 physical = 1;
+  uint32 logical = 2;
+}
+
+// A single key-value pair.
+message KeyValue {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+// A contiguous range of keys defined by [start_key, end_key).
+message KeyRange {
+  bytes start_key = 1;
+  bytes end_key = 2;
+}
+
+// Wrapper for shard identifiers.
+message ShardId {
+  uint64 id = 1;
+}
+
+// Wrapper for node identifiers.
+message NodeId {
+  uint64 id = 1;
+}
+
+// Wrapper for transaction identifiers.
+message TxnId {
+  bytes id = 1;
+}
+
+// Status codes returned by RPCs across the system.
+enum Status {
+  OK = 0;
+  ERROR = 1;
+  NOT_FOUND = 2;
+  CONFLICT = 3;
+  TIMEOUT = 4;
+  ALREADY_EXISTS = 5;
+  INVALID_ARGUMENT = 6;
+  UNAVAILABLE = 7;
+  ABORTED = 8;
+  OUT_OF_RANGE = 9;
+  INTERNAL = 10;
+  PERMISSION_DENIED = 11;
+  UNAUTHENTICATED = 12;
+}
+
+// Standard error response returned when an RPC fails.
+message ErrorResponse {
+  Status status = 1;
+  string message = 2;
+  string details = 3;
+}

@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package particledb.v1;
+
+option java_package = "com.particledb.v1";
+option go_package = "github.com/particledb-ai/particledb-go/proto/particledbpb";
+
+// ParticleDB client API -- provides full SQL execution, bulk insert,
+// CDC subscriptions, and health checking over gRPC.
+service ParticleDB {
+  // Execute a single SQL statement, returning results as a batch of rows.
+  rpc ExecuteSQL(ExecuteSqlRequest) returns (ExecuteSqlResponse);
+
+  // Execute multiple SQL statements in sequence.
+  rpc BatchExecute(BatchExecuteRequest) returns (BatchExecuteResponse);
+
+  // Stream bulk insert (client streams rows, server acks).
+  rpc StreamInsert(stream InsertRowRequest) returns (InsertResult);
+
+  // Subscribe to CDC events on a table.
+  rpc Subscribe(SubscribeRequest) returns (stream ChangeEvent);
+
+  // Health check.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// ---------------------------------------------------------------------------
+// SQL execution
+// ---------------------------------------------------------------------------
+
+message ExecuteSqlRequest {
+  string sql = 1;
+  repeated Value params = 2;
+}
+
+message ExecuteSqlResponse {
+  repeated Column columns = 1;
+  repeated Row rows = 2;
+  int64 rows_affected = 3;
+  string error = 4;
+}
+
+message BatchExecuteRequest {
+  repeated string statements = 1;
+}
+
+message BatchExecuteResponse {
+  repeated ExecuteSqlResponse results = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk insert
+// ---------------------------------------------------------------------------
+
+message InsertRowRequest {
+  string table = 1;
+  repeated string columns = 2;
+  repeated Value values = 3;
+}
+
+message InsertResult {
+  int64 rows_inserted = 1;
+  string error = 2;
+}
+
+// ---------------------------------------------------------------------------
+// CDC subscription
+// ---------------------------------------------------------------------------
+
+message SubscribeRequest {
+  string table = 1;
+  repeated string events = 2; // "INSERT", "UPDATE", "DELETE"
+}
+
+message ChangeEvent {
+  string event = 1;
+  string table = 2;
+  int64 rows = 3;
+  string payload = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Common types
+// ---------------------------------------------------------------------------
+
+message Column {
+  string name = 1;
+  string type = 2;
+}
+
+message Row {
+  repeated Value values = 1;
+}
+
+message Value {
+  oneof kind {
+    int64 int_value = 1;
+    double float_value = 2;
+    string string_value = 3;
+    bool bool_value = 4;
+    bool null_value = 5;
+    bytes bytes_value = 6;
+  }
+}

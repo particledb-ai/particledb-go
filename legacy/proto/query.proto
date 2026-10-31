@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package spanner.query;
+
+option java_package = "com.spanner.query";
+option go_package = "github.com/particledb-ai/particledb-go/proto/querypb";
+
+import "common.proto";
+
+// Controls how the query engine plans and executes a query.
+enum QueryMode {
+  NORMAL = 0;
+  // Return the query plan without executing it.
+  PLAN = 1;
+  // Execute and include the query plan in the response.
+  PROFILE = 2;
+}
+
+// Data types supported in result columns.
+enum DataType {
+  TYPE_UNKNOWN = 0;
+  TYPE_BOOL = 1;
+  TYPE_INT64 = 2;
+  TYPE_FLOAT64 = 3;
+  TYPE_STRING = 4;
+  TYPE_BYTES = 5;
+  TYPE_TIMESTAMP = 6;
+  TYPE_NULL = 7;
+}
+
+// Metadata describing a single column in the result set.
+message ColumnMeta {
+  string name = 1;
+  DataType data_type = 2;
+  bool nullable = 3;
+}
+
+// A single row of query results.
+message Row {
+  // Values are encoded as bytes; the client decodes them using the column metadata.
+  repeated bytes values = 1;
+}
+
+// A complete result set including column metadata and rows.
+message ResultSet {
+  repeated ColumnMeta columns = 1;
+  repeated Row rows = 2;
+}
+
+// Execution statistics returned with query results.
+message QueryStats {
+  uint64 rows_scanned = 1;
+  uint64 rows_returned = 2;
+  // Elapsed execution time in microseconds.
+  uint64 execution_time_us = 3;
+  // Optional query plan in JSON format.
+  string query_plan = 4;
+}
+
+// ---- Query (SELECT) ----
+
+message QueryRequest {
+  string sql = 1;
+  // If set the query executes within this transaction.
+  spanner.common.TxnId txn_id = 2;
+  QueryMode mode = 3;
+  // Maximum number of rows to return.
+  uint64 max_rows = 4;
+  // Continuation token for paginated results.
+  bytes page_token = 5;
+  // Positional parameters for parameterised queries.
+  repeated bytes params = 6;
+}
+
+message QueryResponse {
+  spanner.common.Status status = 1;
+  ResultSet result_set = 2;
+  QueryStats stats = 3;
+  bytes next_page_token = 4;
+}
+
+// ---- Execute (DML: INSERT, UPDATE, DELETE) ----
+
+message ExecuteRequest {
+  string sql = 1;
+  spanner.common.TxnId txn_id = 2;
+  repeated bytes params = 3;
+}
+
+message ExecuteResponse {
+  spanner.common.Status status = 1;
+  // Number of rows affected by the DML statement.
+  uint64 rows_affected = 2;
+  spanner.common.Timestamp timestamp = 3;
+}
+
+// ---- Query Service ----
+
+service QueryService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  // Streaming variant for large result sets.
+  rpc QueryStream(QueryRequest) returns (stream QueryResponse);
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}

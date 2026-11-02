@@ -145,6 +145,10 @@ if err := db.QueryRowContext(ctx, "SELECT $1::int", 42).Scan(&answer); err != ni
 Importing the package registers the `particledb` driver. If you only use
 `database/sql`, a blank import is sufficient. `sql.OpenDB(NewConnector(cfg))`
 accepts a parsed configuration. Use `RETURNING` instead of `LastInsertId`.
+A pooled connection whose session was left inside a transaction block (for
+example by a multi-statement string such as `SELECT 1; BEGIN; SELECT 2`, which
+runs as on PostgreSQL) is discarded rather than reused, so the next caller
+never inherits an open transaction.
 
 ## Cancellation, errors and scope
 

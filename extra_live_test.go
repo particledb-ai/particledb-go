@@ -46,9 +46,28 @@ func TestStdlibRefusals(t *testing.T) {
 	if _, err := db.Exec("SELECT $1", sql.Named("x", 1)); SQLState(err) != "0A000" {
 		t.Fatalf("named parameter: %v", err)
 	}
-	if _, err := db.Exec("SELECT 1; BEGIN; SELECT 2"); SQLState(err) != "0A000" {
+	// Transaction control inside a multi-statement string follows
+	// PostgreSQL 17 (servers from 1.1.19-rc.17): it runs, and the session is
+	// left inside the block. The pool must not hand that open block to the
+	// next caller: the connection is discarded, so the next statement runs
+	// on a fresh session outside any transaction.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("SELECT 1; BEGIN; SELECT 2"); err != nil {
 		t.Fatalf("multi-statement with transaction control: %v", err)
 	}
+	cs, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.Raw(func(dc any) error {
+		if dc.(*driverConn).c.InTransaction() {
+			t.Fatal("pooled connection is still inside a transaction block")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cs.Close()
 	res, err := db.Exec("SELECT 1")
 	if err != nil {
 		t.Fatal(err)

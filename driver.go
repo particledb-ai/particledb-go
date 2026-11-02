@@ -162,8 +162,13 @@ func (dc *driverConn) Ping(ctx context.Context) error {
 	return dc.c.Ping(ctx)
 }
 
+// ResetSession runs before database/sql reuses a pooled connection, never
+// inside a sql.Tx. A connection whose session is still inside a transaction
+// block (a multi-statement string such as "SELECT 1; BEGIN; SELECT 2" leaves
+// one open, as on PostgreSQL) is discarded instead of handing the next caller
+// someone else's open transaction; closing it rolls the block back.
 func (dc *driverConn) ResetSession(ctx context.Context) error {
-	if dc.c.IsClosed() {
+	if dc.c.IsClosed() || dc.c.InTransaction() {
 		return driver.ErrBadConn
 	}
 	return nil

@@ -475,8 +475,9 @@ func (c *wireConn) Close() error {
 	c.smu.Unlock()
 	p := make([]byte, 6)
 	binary.LittleEndian.PutUint32(p, last)
-	_ = c.nc.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-	_ = c.writeFrame(fGoaway, 0, 0, p)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	_ = c.writeFrame(ctx, fGoaway, 0, 0, p)
+	cancel()
 	c.close(errClosed)
 	return nil
 }
@@ -485,7 +486,13 @@ func (c *wireConn) Close() error {
 // A frame appended while another goroutine flushes returns at once and is
 // written by that goroutine; a write failure then closes the connection,
 // which fails the frame's stream.
-func (c *wireConn) writeFrame(typ, flags byte, sid uint32, payload []byte) error {
+//
+// The flushing goroutine bounds its writes by ctx (deadline and
+// cancellation) and by Config.WriteTimeout. Without that a server that
+// stopped reading blocked the writer forever once the socket buffers filled,
+// whatever ctx said. A write that times out may have sent part of a frame, so
+// it closes the connection like any other write failure.
+func (c *wireConn) writeFrame(ctx context.Context, typ, flags byte, sid uint32, payload []byte) error {
 	c.wmu.Lock()
 	if c.werr != nil {
 		err := c.werr
@@ -503,7 +510,7 @@ func (c *wireConn) writeFrame(typ, flags byte, sid uint32, payload []byte) error
 		buf := c.wbuf
 		c.wbuf = c.wspare[:0]
 		c.wmu.Unlock()
-		_, err := c.nc.Write(buf)
+		_, err := c.boundedWrite(ctx, buf)
 		c.wmu.Lock()
 		if cap(buf) <= 1<<20 {
 			c.wspare = buf[:0]
@@ -523,6 +530,33 @@ func (c *wireConn) writeFrame(typ, flags byte, sid uint32, payload []byte) error
 		c.close(err)
 	}
 	return err
+}
+
+// boundedWrite writes buf under ctx and the configured write timeout. Only
+// the flushing goroutine calls it, so the write deadline is its own.
+func (c *wireConn) boundedWrite(ctx context.Context, buf []byte) (int, error) {
+	var dl time.Time
+	if d := c.cfg.writeTimeout(); d > 0 {
+		dl = time.Now().Add(d)
+	}
+	if cdl, ok := ctx.Deadline(); ok && (dl.IsZero() || cdl.Before(dl)) {
+		dl = cdl
+	}
+	_ = c.nc.SetWriteDeadline(dl)
+	fired := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = c.nc.SetWriteDeadline(time.Unix(1, 0))
+		close(fired)
+	})
+	n, err := c.nc.Write(buf)
+	if !stop() {
+		<-fired // the cancel landed; wait for it before clearing the deadline
+	}
+	_ = c.nc.SetWriteDeadline(time.Time{})
+	if err != nil && ctx.Err() != nil {
+		err = fmt.Errorf("%w (%w)", err, ctx.Err())
+	}
+	return n, err
 }
 
 // errNotSent marks a failure that happened before any byte of the request
@@ -565,7 +599,7 @@ func (c *wireConn) start(ctx context.Context, typ, flags byte, payload []byte) (
 		b.space.Broadcast()
 		b.mu.Unlock()
 	}
-	if err := c.writeFrame(typ, flags|flagEndStream, s.id, payload); err != nil {
+	if err := c.writeFrame(ctx, typ, flags|flagEndStream, s.id, payload); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -613,7 +647,7 @@ func (s *stream) resetStream() {
 	s.reset = true
 	s.mu.Unlock()
 	p := []byte{byte(errCancel), byte(errCancel >> 8)}
-	_ = s.c.writeFrame(fRstStreamC, 0, s.id, p)
+	_ = s.c.writeFrame(context.Background(), fRstStreamC, 0, s.id, p)
 }
 
 // abandon drops the rest of the stream: it is reset and its frames are
@@ -782,7 +816,7 @@ func (c *wireConn) ping(ctx context.Context) error {
 	case <-c.pong:
 	default:
 	}
-	if err := c.writeFrame(fPing, flagEndStream, 0, nil); err != nil {
+	if err := c.writeFrame(ctx, fPing, flagEndStream, 0, nil); err != nil {
 		return err
 	}
 	select {

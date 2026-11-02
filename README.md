@@ -72,7 +72,7 @@ The module source is published at
 From your module:
 
 ```sh
-go get github.com/particledb-ai/particledb-go@v0.2.0
+go get github.com/particledb-ai/particledb-go@v0.2.2
 ```
 
 The module requires Go 1.26.10 or newer; with an older local toolchain, `go`
@@ -152,6 +152,12 @@ A context deadline cancels the running statement on the server. The
 connection remains usable when the server confirms cancellation. If the
 server does not answer within the cancellation grace period, the connection
 closes because the outcome is unknown. Requests are not automatically replayed.
+Writes honour the context too: a server that stops reading (paused or
+partitioned) cannot block a large request once the socket buffers fill. The
+context's deadline or cancellation, or `WriteTimeout` (`write_timeout`, a Go
+duration; default 30s, negative for no bound beyond the context) when that is
+sooner, ends the write; the connection then closes, since part of a frame may
+have been sent. `writetimeout_fake_test.go` covers these cases.
 `Error` exposes SQLSTATE and `IsRetryable` identifies transaction conflicts;
 retry the complete application transaction only when that is appropriate.
 Connection-string parse errors omit the original URL, malformed fragments

@@ -69,6 +69,15 @@ type Config struct {
 	// because the statement's outcome is unknown. 0 = 5 s.
 	CancelGrace time.Duration
 
+	// WriteTimeout bounds each write of a request to the server when the
+	// statement's context has no earlier deadline, so a server that stopped
+	// reading (paused, partitioned) cannot block a writer forever once the
+	// socket buffers fill. A write that times out leaves a partial frame on
+	// the socket, so the connection is closed (08006). The context's deadline
+	// and cancellation always apply. 0 = 30 s, negative = no bound beyond the
+	// context.
+	WriteTimeout time.Duration
+
 	// OnNotice, when set, receives every advisory the server attaches to a
 	// statement (PostgreSQL's NoticeResponse; for example the notice that a
 	// CREATE INDEX ... USING gin is kept as a btree).
@@ -106,7 +115,8 @@ func (c *Config) sharedStreams() int {
 // (disable | require | verify-ca | verify-full), sslrootcert, sslcert, sslkey,
 // sslnegotiation (direct | upgrade), connect_timeout (seconds),
 // prefer_unix_socket, unix_socket_dir, unix_socket_path, timezone,
-// statement_cache_capacity, cancel_grace (Go duration), pool_max_conns,
+// statement_cache_capacity, cancel_grace (Go duration), write_timeout (Go
+// duration), pool_max_conns,
 // pool_min_conns, pool_max_conn_lifetime, pool_max_conn_idle_time,
 // pool_health_check_period. Any other key is applied as a session setting.
 func ParseConfig(dsn string) (*Config, error) {
@@ -263,6 +273,8 @@ func (c *Config) applyParams(p map[string]string) error {
 			c.StatementCacheCapacity, err = strconv.Atoi(v)
 		case "cancel_grace":
 			c.CancelGrace, err = time.ParseDuration(v)
+		case "write_timeout":
+			c.WriteTimeout, err = time.ParseDuration(v)
 		case "pool_max_conns":
 			c.MaxConns, err = strconv.Atoi(v)
 		case "pool_min_conns":
@@ -382,6 +394,17 @@ func (c *Config) connectTimeout() time.Duration {
 		return c.ConnectTimeout
 	}
 	return 10 * time.Second
+}
+
+// writeTimeout is the per-write bound; 0 means none (only the context).
+func (c *Config) writeTimeout() time.Duration {
+	switch {
+	case c.WriteTimeout > 0:
+		return c.WriteTimeout
+	case c.WriteTimeout < 0:
+		return 0
+	}
+	return 30 * time.Second
 }
 
 func (c *Config) cancelGrace() time.Duration {
